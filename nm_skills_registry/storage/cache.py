@@ -135,16 +135,18 @@ class CachedStore:
         return self.get(key).decode("utf-8")
 
     def get_with_etag(self, key: str) -> tuple[bytes, str | None]:
-        # The ETag comes from the last sync (an authority-observed value), not a
-        # fresh HEAD: CAS safety is enforced by the authority at PUT time, so a
-        # stale read simply loses the race and the caller retries.
+        # Revalidate against a fresh HEAD: another process (CLI, second agent)
+        # may have written this key since our last sync, and a stale index
+        # ETag would make CAS retries loop on a precondition failure forever.
+        # Only used on rare read-modify-write paths, so the HEAD is fine.
         with self._lock:
+            meta = self.authority.head(key)
             path = self._mirror_path(key)
             index = self._load_index()
-            if not path.is_file():
-                self._pull_key(key, self.authority.head(key), index)
+            if not path.is_file() or index.get(key, {}).get("etag") != meta.etag:
+                self._pull_key(key, meta, index)
                 self._save_index(index)
-            return path.read_bytes(), index.get(key, {}).get("etag")
+            return path.read_bytes(), meta.etag
 
     def head(self, key: str) -> ObjectMeta:
         return self.authority.head(key)

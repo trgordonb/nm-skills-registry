@@ -100,6 +100,20 @@ def test_cas_passthrough(setup):
     assert cached.get("k.txt") == b"v2"
 
 
+def test_cas_recovers_from_external_write(setup):
+    """Regression: another process writing the key between our sync and the
+    CAS write must not poison get_with_etag with a stale index ETag (the
+    browser-toggle 500 of 2026-10-04)."""
+    authority, cached, aroot, mroot = setup
+    cached.put("state/x.json", b'{"v":1}')
+    # external writer bypasses the cache's mirror + index entirely
+    authority.put("state/x.json", b'{"v":2}')
+    data, etag = cached.get_with_etag("state/x.json")
+    assert data == b'{"v":2}'  # fresh content, not the stale mirror
+    cached.put("state/x.json", b'{"v":3}', if_match=etag)  # must not raise
+    assert authority.get("state/x.json") == b'{"v":3}'
+
+
 def test_drift_reports_out_of_band_edits(setup):
     authority, cached, aroot, mroot = setup
     cached.put("skills/a/SKILL.md", b"v1")

@@ -327,5 +327,11 @@ class SkillRegistry:
                     break
         if rel_dir is None:
             return f"Rejected: no skill named {name_or_rel!r}"
-        self.state.set_disabled(rel_dir, not enabled)
+        try:
+            self.state.set_disabled(rel_dir, not enabled)
+        except PreconditionFailedError:
+            return (
+                "ERROR: skill state changed concurrently; refresh and retry "
+                "(the write was not applied)"
+            )
         return f"OK: {'enabled' if enabled else 'disabled'} skill {rel_dir!r}"
