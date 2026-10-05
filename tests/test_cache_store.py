@@ -114,13 +114,70 @@ def test_cas_recovers_from_external_write(setup):
     assert authority.get("state/x.json") == b'{"v":3}'
 
 
-def test_sync_tolerates_directory_markers(setup):
+class MarkerAuthority:
+    """Stub authority reproducing an R2 quirk LocalDirStore cannot: a 0-byte
+    marker object AT the prefix itself ('skills') alongside real keys under it
+    — local filesystems can't have file 'skills' and dir 'skills/' at once."""
+
+    supports_cas = True
+
+    def __init__(self, objects: dict[str, bytes]):
+        self.objects = objects
+
+    def list_prefix(self, prefix=""):
+        from nm_skills_registry.storage.base import ObjectMeta
+
+        return [
+            ObjectMeta(key=k, size=len(v), etag=f'"{len(v)}"')
+            for k, v in sorted(self.objects.items())
+            if k.startswith(prefix)
+        ]
+
+    def get(self, key):
+        if key not in self.objects:
+            raise KeyError(key)
+        return self.objects[key]
+
+    def get_text(self, key):
+        return self.get(key).decode()
+
+    def head(self, key):
+        metas = {m.key: m for m in self.list_prefix()}
+        if key not in metas:
+            raise KeyError(key)
+        return metas[key]
+
+    def exists(self, key):
+        return key in self.objects
+
+    def local_path(self, key):
+        return key
+
+    def put(self, key, data, *, if_match=None, create=False):
+        self.objects[key] = bytes(data)
+        from nm_skills_registry.storage.base import ObjectMeta
+
+        return ObjectMeta(key=key, size=len(data), etag=f'"{len(data)}"')
+
+    def delete(self, key):
+        self.objects.pop(key, None)
+
+    def delete_prefix(self, prefix):
+        keys = [k for k in self.objects if k.startswith(prefix)]
+        for k in keys:
+            del self.objects[k]
+        return len(keys)
+
+
+def test_sync_tolerates_directory_markers(tmp_path):
     """Regression: manual uploads (R2 console) leave 0-byte marker objects at
     the prefix itself — sync must skip them, not 404 trying to GET 'skills'."""
-    authority, cached, aroot, mroot = setup
-    authority.put("skills", b"")  # marker: key == prefix.rstrip("/")
-    authority.put("skills/a/SKILL.md", b"real content")
-    authority.put("skills/b/", b"")  # trailing-slash marker
+    authority = MarkerAuthority({
+        "skills": b"",  # marker: key == prefix.rstrip("/")
+        "skills/a/SKILL.md": b"real content",
+        "skills/b/": b"",  # trailing-slash marker
+    })
+    cached = CachedStore(authority, tmp_path / "mirror")
     report = cached.sync("skills/")
     assert report.pulled == ["skills/a/SKILL.md"]
     assert cached.get_text("skills/a/SKILL.md") == "real content"
