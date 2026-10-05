@@ -114,6 +114,18 @@ def test_cas_recovers_from_external_write(setup):
     assert authority.get("state/x.json") == b'{"v":3}'
 
 
+def test_sync_tolerates_directory_markers(setup):
+    """Regression: manual uploads (R2 console) leave 0-byte marker objects at
+    the prefix itself — sync must skip them, not 404 trying to GET 'skills'."""
+    authority, cached, aroot, mroot = setup
+    authority.put("skills", b"")  # marker: key == prefix.rstrip("/")
+    authority.put("skills/a/SKILL.md", b"real content")
+    authority.put("skills/b/", b"")  # trailing-slash marker
+    report = cached.sync("skills/")
+    assert report.pulled == ["skills/a/SKILL.md"]
+    assert cached.get_text("skills/a/SKILL.md") == "real content"
+
+
 def test_drift_reports_out_of_band_edits(setup):
     authority, cached, aroot, mroot = setup
     cached.put("skills/a/SKILL.md", b"v1")

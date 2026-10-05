@@ -82,7 +82,11 @@ class SkillRegistry:
             except Exception as e:  # offline: keep serving the mirror
                 self.last_sync_error = f"{type(e).__name__}: {e}"
         index: dict[str, SkillEntry] = {}
+        prefix_base = self.prefix.rstrip("/")
         for meta in self.store.list_prefix(self.prefix):
+            # skip directory markers (0-byte prefix objects from manual uploads)
+            if meta.key == prefix_base or meta.key.endswith("/"):
+                continue
             if not meta.key.endswith("/" + _SKILL_FILE):
                 continue
             rel_dir = meta.key[len(self.prefix) : -len("/" + _SKILL_FILE)]

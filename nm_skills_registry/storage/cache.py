@@ -80,7 +80,14 @@ class CachedStore:
         with self._lock:
             report = SyncReport()
             index = self._load_index()
-            authority_metas = {m.key: m for m in self.authority.list_prefix(prefix)}
+            prefix_base = prefix.rstrip("/")
+            authority_metas = {
+                m.key: m
+                for m in self.authority.list_prefix(prefix)
+                # skip directory markers: R2 returns 0-byte objects at the
+                # prefix itself for console/manual uploads, and GETting them 404s
+                if m.key != prefix_base and not m.key.endswith("/")
+            }
             for key, meta in authority_metas.items():
                 entry = index.get(key)
                 if (
