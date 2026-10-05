@@ -117,18 +117,27 @@ def test_cas_recovers_from_external_write(setup):
 class MarkerAuthority:
     """Stub authority reproducing an R2 quirk LocalDirStore cannot: a 0-byte
     marker object AT the prefix itself ('skills') alongside real keys under it
-    — local filesystems can't have file 'skills' and dir 'skills/' at once."""
+    — local filesystems can't have file 'skills' and dir 'skills/' at once.
+
+    ETags follow the real S3 simple-PUT contract (quoted content MD5), which
+    the adopt-without-download optimization depends on."""
 
     supports_cas = True
 
     def __init__(self, objects: dict[str, bytes]):
         self.objects = objects
 
+    @staticmethod
+    def _etag(v: bytes) -> str:
+        import hashlib
+
+        return '"' + hashlib.md5(v).hexdigest() + '"'
+
     def list_prefix(self, prefix=""):
         from nm_skills_registry.storage.base import ObjectMeta
 
         return [
-            ObjectMeta(key=k, size=len(v), etag=f'"{len(v)}"')
+            ObjectMeta(key=k, size=len(v), etag=self._etag(v))
             for k, v in sorted(self.objects.items())
             if k.startswith(prefix)
         ]
@@ -157,7 +166,7 @@ class MarkerAuthority:
         self.objects[key] = bytes(data)
         from nm_skills_registry.storage.base import ObjectMeta
 
-        return ObjectMeta(key=key, size=len(data), etag=f'"{len(data)}"')
+        return ObjectMeta(key=key, size=len(data), etag=self._etag(bytes(data)))
 
     def delete(self, key):
         self.objects.pop(key, None)
@@ -181,6 +190,39 @@ def test_sync_tolerates_directory_markers(tmp_path):
     report = cached.sync("skills/")
     assert report.pulled == ["skills/a/SKILL.md"]
     assert cached.get_text("skills/a/SKILL.md") == "real content"
+
+
+def test_sync_adopts_identical_local_files_without_downloading(tmp_path):
+    """import-then-pull: mirror files whose content already matches the
+    authority ETag are adopted without GETs — a first pull of a 716-object
+    prefix (raw/) must not re-download everything."""
+    authority = MarkerAuthority({
+        "raw/a/data.csv": b"1,2,3",
+        "raw/b/data.csv": b"4,5,6",
+        "raw/c/changed.csv": b"authoritative",
+    })
+    cached = CachedStore(authority, tmp_path / "mirror")
+    # pre-seed the mirror as if `import` had copied the files locally
+    for rel, content in (("raw/a/data.csv", b"1,2,3"), ("raw/b/data.csv", b"4,5,6"),
+                         ("raw/c/changed.csv", b"LOCAL-EDIT")):
+        p = tmp_path / "mirror" / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(content)
+
+    gets: list[str] = []
+    orig_get = authority.get
+    authority.get = lambda key: (gets.append(key), orig_get(key))[1]
+
+    report = cached.sync("raw/")
+    assert sorted(gets) == ["raw/c/changed.csv"]  # only the divergent file
+    assert report.pulled == ["raw/c/changed.csv"]
+    assert report.unchanged == 2
+    assert cached.get_text("raw/a/data.csv") == "1,2,3"
+    assert cached.get_text("raw/c/changed.csv") == "authoritative"  # authority wins
+
+    # index adopted → the next sync is fully unchanged
+    report2 = cached.sync("raw/")
+    assert report2.pulled == [] and report2.unchanged == 3
 
 
 def test_drift_reports_out_of_band_edits(setup):

@@ -36,14 +36,17 @@ def validate_prefix(prefix: str) -> str:
     return prefix
 
 
-def _content_etag(path: Path) -> str:
-    """Content-addressed ETag (md5 hex) — same semantics as S3 simple PUTs, so
-    CAS never passes for changed content regardless of mtime granularity."""
+def content_md5(path: Path) -> str:
+    """Content-addressed MD5 hex — matches S3 simple-PUT ETags (quote-stripped)."""
     h = hashlib.md5()
     with path.open("rb") as f:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def _content_etag(path: Path) -> str:
+    return content_md5(path)
 
 
 class LocalDirStore:

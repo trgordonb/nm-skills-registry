@@ -76,7 +76,13 @@ class CachedStore:
 
     def sync(self, prefix: str = "") -> SyncReport:
         """Pull the authority into the mirror; prune removed keys. One list
-        request + GETs for changed keys only."""
+        request + parallel GETs for changed keys only. When the mirror already
+        holds a file whose content MD5 matches the authority ETag (the
+        import-then-pull pattern), it is adopted without a download."""
+        from concurrent.futures import ThreadPoolExecutor
+
+        from .local import content_md5
+
         with self._lock:
             report = SyncReport()
             index = self._load_index()
@@ -88,6 +94,12 @@ class CachedStore:
                 # prefix itself for console/manual uploads, and GETting them 404s
                 if m.key != prefix_base and not m.key.endswith("/")
             }
+
+            def fetch(item):
+                key, _meta = item
+                return key, self.authority.get(key)
+
+            changed: list[tuple[str, ObjectMeta]] = []
             for key, meta in authority_metas.items():
                 entry = index.get(key)
                 if (
@@ -97,14 +109,36 @@ class CachedStore:
                 ):
                     report.unchanged += 1
                     continue
-                self._pull_key(key, meta, index)
-                report.pulled.append(key)
+                path = self._mirror_path(key)
+                if path.is_file() and meta.etag and content_md5(path) == meta.etag.strip('"'):
+                    # local content already matches the authority — adopt it
+                    # (skip the download; import-then-pull pays zero GETs)
+                    index[key] = {"etag": meta.etag, "size": meta.size}
+                    report.unchanged += 1
+                    continue
+                changed.append((key, meta))
+
+            if changed:
+                # parallel GETs: obstore handles concurrent use; writes target
+                # distinct files, and the index is updated in this thread only
+                with ThreadPoolExecutor(max_workers=8) as pool:
+                    for key, data in pool.map(fetch, changed):
+                        meta = authority_metas[key]
+                        self._write_mirror(key, data)
+                        index[key] = {"etag": meta.etag, "size": len(data)}
+                        report.pulled.append(key)
+
             for key in [k for k in index if k.startswith(prefix) and k not in authority_metas]:
                 self._remove_key(key, index)
                 report.removed.append(key)
             self._save_index(index)
             self.last_sync[prefix] = len(authority_metas)
             return report
+
+    def _write_mirror(self, key: str, data: bytes) -> None:
+        path = self._mirror_path(key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
 
     def _pull_key(self, key: str, meta: ObjectMeta, index: dict[str, dict]) -> None:
         data = self.authority.get(key)
