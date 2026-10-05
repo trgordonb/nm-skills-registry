@@ -20,6 +20,16 @@ SKIP_DIRS = {"__pycache__", ".git", ".pytest_cache", ".venv"}
 SKIP_SUFFIXES = (".pyc",)
 
 
+def _local_md5(full: Path) -> str:
+    import hashlib
+
+    h = hashlib.md5()
+    with full.open("rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def _local_files(root: Path):
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
@@ -91,8 +101,8 @@ def cmd_push(args) -> int:
     for key, full in _local_files(local_dir):
         full_key = prefix + key
         meta = authority_metas.get(full_key)
-        if meta is not None and meta.size == full.stat().st_size:
-            continue  # cheap size check; content-addressed sync is rclone's job
+        if meta is not None and meta.etag and meta.etag.strip('"') == _local_md5(full):
+            continue  # R2 etags are content md5s for simple puts → exact change detection
         authority.put(full_key, full.read_bytes())
         uploaded += 1
     if args.prune:
@@ -179,7 +189,9 @@ def main(argv: list[str] | None = None) -> int:
 
     add("import", "upload a local directory into the registry", fn=cmd_import, needs_dir=True)
     add("pull", "pull the registry into the local mirror", fn=cmd_pull, needs_dir=True)
-    add("push", "push new/changed local files into the registry", fn=cmd_push, needs_dir=True)
+    p_push = add("push", "push new/changed local files into the registry", fn=cmd_push, needs_dir=True)
+    p_push.add_argument("--prune", action="store_true",
+                        help="also delete registry keys that no longer exist locally")
     add("sync", "pull then push", fn=cmd_sync, needs_dir=True)
     add("list", "list skills with enabled state", fn=cmd_list)
     add("enable", "enable a skill", fn=cmd_toggle, needs_name=True)

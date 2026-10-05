@@ -68,3 +68,25 @@ def test_import_requires_url(workspace, monkeypatch):
     monkeypatch.delenv("SKILLS_REGISTRY", raising=False)
     with pytest.raises(SystemExit):
         main(["import", str(workspace[1])])
+
+
+def test_push_uploads_same_size_edits(workspace, capsys):
+    """Same-size content edits must be detected (etag compare, not size)."""
+    tmp_path, src = workspace
+    url = f"local:{tmp_path / 'bucket'}"
+    assert main(["import", str(src), "--url", url]) == 0
+    capsys.readouterr()
+
+    skill_md = src / "alpha" / "SKILL.md"
+    original = skill_md.read_text()
+    skill_md.write_text(original.replace("A.", "B."))  # same size, different content
+
+    assert main(["push", str(src), "--url", url]) == 0
+    assert "1 uploaded" in capsys.readouterr().out
+    bucket = LocalDirStore(tmp_path / "bucket")
+    assert b"B." in bucket.get("skills/alpha/SKILL.md")
+    assert b"A." not in bucket.get("skills/alpha/SKILL.md")
+
+    # unchanged tree → next push is a no-op
+    assert main(["push", str(src), "--url", url]) == 0
+    assert "0 uploaded" in capsys.readouterr().out
