@@ -1,6 +1,6 @@
 [project]
 name = "nm-skills-registry"
-version = "0.1.4"
+version = "0.1.5"
 description = "S3-backed agent skills registry with per-user enable/disable (Hermes-style toggles)"
 readme = "README.md"
 requires-python = ">=3.11"

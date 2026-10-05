@@ -37,7 +37,9 @@ _DELETE_BATCH = 500
 
 
 def _map_error(e: Exception, key: str) -> Exception:
-    if isinstance(e, _ObNotFound):
+    # Missing-key detection: the S3 backend raises builtin FileNotFoundError
+    # on 404 (MemoryStore raises obstore's NotFoundError — hence both here).
+    if isinstance(e, (_ObNotFound, FileNotFoundError)):
         return ObjectNotFoundError(key)
     if isinstance(e, _ObPrecondition):
         return PreconditionFailedError(f"etag mismatch for {key}: {e}")

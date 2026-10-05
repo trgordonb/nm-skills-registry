@@ -58,3 +58,16 @@ def test_cas_roundtrip(store):
 def test_r2_is_r2(store):
     # sanity: this really is the neuralmatrix bucket over the R2 endpoint
     assert "r2.cloudflarestorage" in (os.environ.get("R2_ENDPOINT_URL") or "")
+
+
+def test_missing_key_maps_to_object_not_found(store):
+    """Regression (v0.1.5): R2's S3 backend raises builtin FileNotFoundError
+    on 404 — _map_error must translate it, not leak ObjectStoreError."""
+    from nm_skills_registry.storage.base import ObjectNotFoundError
+    from nm_skills_registry.storage.s3 import _map_error
+
+    mapped = _map_error(FileNotFoundError("Object at location x not found"), "x")
+    assert isinstance(mapped, ObjectNotFoundError)
+    assert store.exists("definitely-missing-xyz-v015") is False
+    with pytest.raises(ObjectNotFoundError):
+        store.head("definitely-missing-xyz-v015")
