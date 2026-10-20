@@ -5,3 +5,20 @@ __pycache__/
 .pytest_cache/
 .kilo
 *.egg-info/
+.omni/
+.claude/
+.github/
+.cursor/
+.kiro/
+.agents/
+.env.omni
+
+# Working copy of skills pulled from R2 (SKILLS_DIR default: "skills").
+# Content lives in the bucket, not in git.
+skills/
+
+# Per-user enable/disable state (runtime)
+state/
+
+# Generated sync index (path -> {etag,size}); rebuilt by pull/sync
+.nm-skills-registry-index.json
