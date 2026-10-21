@@ -90,3 +90,19 @@ def test_push_uploads_same_size_edits(workspace, capsys):
     # unchanged tree → next push is a no-op
     assert main(["push", str(src), "--url", url]) == 0
     assert "0 uploaded" in capsys.readouterr().out
+
+
+def test_sync_runs_pull_then_push(workspace, capsys):
+    """``sync`` used to raise AttributeError: cmd_push reached via cmd_sync
+    read ``args.prune``, which the sync subparser never defined."""
+    tmp_path, src = workspace
+    url = f"local:{tmp_path / 'bucket'}"
+    assert main(["import", str(src), "--url", url]) == 0
+    capsys.readouterr()
+
+    assert main(["sync", str(src), "--url", url]) == 0
+    out = capsys.readouterr().out
+    assert "pull from" in out and "push " in out
+
+    # the flag must parse too (same code path with pruning enabled)
+    assert main(["sync", str(src), "--url", url, "--prune"]) == 0

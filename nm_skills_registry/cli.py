@@ -192,7 +192,9 @@ def main(argv: list[str] | None = None) -> int:
     p_push = add("push", "push new/changed local files into the registry", fn=cmd_push, needs_dir=True)
     p_push.add_argument("--prune", action="store_true",
                         help="also delete registry keys that no longer exist locally")
-    add("sync", "pull then push", fn=cmd_sync, needs_dir=True)
+    p_sync = add("sync", "pull then push", fn=cmd_sync, needs_dir=True)
+    p_sync.add_argument("--prune", action="store_true",
+                        help="also delete registry keys that no longer exist locally")
     add("list", "list skills with enabled state", fn=cmd_list)
     add("enable", "enable a skill", fn=cmd_toggle, needs_name=True)
     add("disable", "disable a skill", fn=cmd_toggle, needs_name=True)

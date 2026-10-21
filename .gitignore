@@ -14,11 +14,11 @@ __pycache__/
 .env.omni
 
 # Working copy of skills pulled from R2 (SKILLS_DIR default: "skills").
-# Content lives in the bucket, not in git.
-skills/
+# Content lives in the bucket, not in git. Root-anchored on purpose.
+/skills/
 
 # Per-user enable/disable state (runtime)
-state/
+/state/
 
 # Generated sync index (path -> {etag,size}); rebuilt by pull/sync
 .nm-skills-registry-index.json
